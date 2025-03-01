@@ -42,13 +42,13 @@ pub fn hash_master_password(password: &str, salt: &str) -> AppResult<String> {
         )
         .map_err(|e| AppError::Crypto(e.to_string()))?;
 
-    Ok(base64::encode(password_hash))
+    Ok(general_purpose::STANDARD.encode(password_hash))
 }
 
 /// Verify the master password against its hash
 pub fn verify_master_password(password: &str, password_hash: &str) -> AppResult<bool> {
     let parsed_hash =
-        PasswordHash::new(&password_hash).map_err(|e| AppError::Crypto(e.to_string()))?;
+        PasswordHash::new(password_hash).map_err(|e| AppError::Crypto(e.to_string()))?;
 
     let argon2_instance = Argon2::default();
     let result = argon2_instance
@@ -143,7 +143,7 @@ pub fn decrypt_password(encrypted_password: &str, dek: &[u8]) -> AppResult<Strin
     let cipher = Aes256Gcm::new(key);
 
     let plain_text = cipher
-        .decrypt(&nonce, cipher_text)
+        .decrypt(nonce, cipher_text)
         .map_err(|e| AppError::Crypto(e.to_string()))?;
 
     String::from_utf8(plain_text).map_err(|e| AppError::Crypto(e.to_string()))

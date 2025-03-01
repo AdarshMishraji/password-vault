@@ -4,6 +4,7 @@ members = [
     "app"
 ]
 resolver = "2"
+
 [workspace.dependencies]
 axum = "0.8"
 async-graphql = "7.0"

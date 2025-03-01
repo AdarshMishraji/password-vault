@@ -8,7 +8,7 @@ mod utils;
 
 use std::time::Duration;
 
-use axum::{serve, Router};
+use axum::serve;
 use configs::{database, env};
 use constants::art::ASCII_ART;
 use dtos::app_state::AppState;

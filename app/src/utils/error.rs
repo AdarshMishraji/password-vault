@@ -38,9 +38,9 @@ impl IntoResponse for AppError {
             AppError::Authorization(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            AppError::Database(_) => (
+            AppError::Database(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
+                format!("Database error: {}", error),
             ),
             AppError::Crypto(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
