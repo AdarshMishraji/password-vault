@@ -2,22 +2,27 @@ use std::sync::Arc;
 
 use async_graphql::Context;
 use chrono::{Duration, Utc};
+use r2d2_redis::{r2d2::Pool, redis::Commands, RedisConnectionManager};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
-    TransactionError, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set, TransactionError,
+    TransactionTrait,
 };
+use serde_json::to_string;
 use uuid::Uuid;
 
 use crate::{
     configs::env::Env,
     dtos::app_state::AppState,
     models::{
-        recovery_code, session, user,
-        user_dtos::{UserLoginRequest, UserLoginResponse, UserSignupRequest, UserSignupResponse},
+        recovery_code, user,
+        user_dtos::{
+            UserLoginRequest, UserLoginResponse, UserRedisSession, UserSignupRequest,
+            UserSignupResponse,
+        },
     },
     services::crypto::{
-        derive_kek, encrypt_dek, generate_dek, generate_recovery_keys, generate_session_token,
-        hash_master_password, hash_recovery_code, verify_master_password,
+        decrypt_dek, derive_kek, encrypt_dek, generate_dek, generate_recovery_keys,
+        generate_session_token, hash_master_password, hash_recovery_code, verify_master_password,
     },
     utils::error::{AppError, AppResult},
 };
@@ -52,6 +57,43 @@ fn generate_recovery_keys_for_dek(
     Ok((recovery_code_entities, recovery_keys))
 }
 
+fn generate_and_save_session(
+    user_redis_session: UserRedisSession,
+    redis_pool_manager: &Arc<Pool<RedisConnectionManager>>,
+    env_variables: Arc<Env>,
+    ctx: &Context<'_>,
+) -> AppResult<()> {
+    let session_token = generate_session_token();
+    let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes as i64);
+
+    let user_redis_session_str =
+        to_string(&user_redis_session).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let mut redis_connection = redis_pool_manager
+        .get()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    redis_connection
+        .set_ex::<String, String, ()>(
+            session_token.to_string(),
+            user_redis_session_str,
+            (env_variables.session_expire_minutes.clone() as usize) * 60,
+        )
+        .map_err(|e| AppError::Database(e.to_string()))
+        .unwrap();
+
+    ctx.insert_http_header(
+        "Set-Cookie",
+        format!(
+            "session_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Expires={}",
+            session_token,
+            expires_at.format("%a, %d %b %Y %T GMT")
+        ),
+    );
+
+    Ok(())
+}
+
 pub async fn signup(
     ctx: &Context<'_>,
     request: UserSignupRequest,
@@ -61,13 +103,14 @@ pub async fn signup(
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
 
     let db_connection = &app_state.database_connection;
+    let redis_pool_manager = &app_state.redis_pool_manager;
     let env_variables = &app_state.env_variables;
 
     let email = request.email;
     let master_password = request.master_password;
 
     let user = user::Entity::find()
-        .filter(user::Column::Email.eq(email.to_string()))
+        .filter(user::Column::Email.eq(&email))
         .one(db_connection.as_ref())
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -95,17 +138,6 @@ pub async fn signup(
     let (recovery_code_entities, recovery_keys) =
         generate_recovery_keys_for_dek(&dek, &user_id, env_variables)?;
 
-    let session_token = generate_session_token();
-    let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes);
-
-    let session = session::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(user_id.clone()),
-        expires_at: Set(expires_at),
-        token: Set(session_token.clone()),
-        ..Default::default()
-    };
-
     db_connection
         .transaction(move |txn| {
             Box::pin(async move {
@@ -115,21 +147,22 @@ pub async fn signup(
                     .exec(txn)
                     .await?;
 
-                session::Entity::insert(session).exec(txn).await?;
                 Ok(())
             })
         })
         .await
         .map_err(|e: TransactionError<DbErr>| AppError::Database(e.to_string()))?;
 
-    ctx.insert_http_header(
-        "Set-Cookie",
-        format!(
-            "session_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Expires={}",
-            session_token,
-            expires_at.format("%a, %d %b %Y %T GMT")
-        ),
-    );
+    generate_and_save_session(
+        UserRedisSession {
+            id: user_id,
+            dek: dek.to_vec(),
+            email,
+        },
+        redis_pool_manager,
+        env_variables.clone(),
+        ctx,
+    )?;
 
     return Ok(UserSignupResponse {
         id: user_id,
@@ -143,12 +176,13 @@ pub async fn login(ctx: &Context<'_>, request: UserLoginRequest) -> AppResult<Us
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
 
     let db_connection = &app_state.database_connection;
+    let redis_pool_manager = &app_state.redis_pool_manager;
     let env_variables = &app_state.env_variables;
 
     let email = request.email;
 
     let user = user::Entity::find()
-        .filter(user::Column::Email.eq(email.to_string()))
+        .filter(user::Column::Email.eq(&email))
         .one(db_connection.as_ref())
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -168,28 +202,19 @@ pub async fn login(ctx: &Context<'_>, request: UserLoginRequest) -> AppResult<Us
         ));
     }
 
-    let session_token = generate_session_token();
-    let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes);
+    let kek = derive_kek(&request_master_password)?;
+    let dek = decrypt_dek(&user.encrypted_dek, &kek)?;
 
-    session::Entity::insert(session::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(user.id.clone()),
-        expires_at: Set(expires_at),
-        token: Set(session_token.clone()),
-        ..Default::default()
-    })
-    .exec(db_connection.as_ref())
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    ctx.insert_http_header(
-        "Set-Cookie",
-        format!(
-            "session_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Expires={}",
-            session_token,
-            expires_at.format("%a, %d %b %Y %T GMT")
-        ),
-    );
+    generate_and_save_session(
+        UserRedisSession {
+            id: user.id,
+            dek,
+            email: user.email,
+        },
+        redis_pool_manager,
+        env_variables.clone(),
+        ctx,
+    )?;
 
     return Ok(UserLoginResponse {
         message: "Login Successful".to_string(),

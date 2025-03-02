@@ -161,6 +161,6 @@ pub fn generate_session_token() -> String {
 }
 
 /// format multiple recovery codes
-pub fn generate_recovery_keys(count: usize) -> Vec<String> {
+pub fn generate_recovery_keys(count: i32) -> Vec<String> {
     (0..count).map(|_| generate_recovery_key()).collect()
 }

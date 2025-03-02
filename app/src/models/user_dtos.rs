@@ -1,6 +1,4 @@
-use super::user::Model;
 use async_graphql::{InputObject, SimpleObject};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -32,24 +30,14 @@ pub struct UserLoginResponse {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, SimpleObject)]
-pub struct UserResponse {
-    pub id: Uuid,
-    pub email: String,
-    pub created_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RecoveryKeysResponse {
     pub recovery_keys: Vec<String>,
 }
 
-impl From<Model> for UserResponse {
-    fn from(user: Model) -> Self {
-        UserResponse {
-            id: user.id,
-            email: user.email,
-            created_at: user.created_at,
-        }
-    }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserRedisSession {
+    pub id: Uuid,
+    pub email: String,
+    pub dek: Vec<u8>,
 }

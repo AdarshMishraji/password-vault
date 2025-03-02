@@ -10,7 +10,9 @@ async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 
 tokio = { workspace = true }
+
 sea-orm = { workspace = true }
+r2d2_redis = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
