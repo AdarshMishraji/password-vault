@@ -1,13 +1,13 @@
 use axum::{
     body::Body,
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    http::{Response, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use serde_json::json;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum AppError {
     #[error("Authentication error: {0}")]
     Authentication(String),
@@ -21,8 +21,11 @@ pub enum AppError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(String),
 
     #[error("Crypto error: {0}")]
     Crypto(String),
@@ -38,6 +41,7 @@ impl IntoResponse for AppError {
             AppError::Authorization(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::Database(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Database error: {}", error),

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 
@@ -8,7 +10,7 @@ struct Health {
     healthy: bool,
 }
 
-pub async fn health(_: State<AppState>) -> impl IntoResponse {
+pub async fn health(_: State<Arc<AppState>>) -> impl IntoResponse {
     let health = Health { healthy: true };
     (StatusCode::OK, Json(health))
 }

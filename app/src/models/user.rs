@@ -11,9 +11,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub email: String,
     pub master_password_hash: String,
-    pub master_password_salt: String,
     pub encrypted_dek: String,
-    pub salt: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

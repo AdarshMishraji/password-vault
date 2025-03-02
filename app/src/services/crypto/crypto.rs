@@ -4,14 +4,13 @@ use aes_gcm::{
 };
 use argon2::{
     password_hash::{rand_core::RngCore, SaltString},
-    Argon2, PasswordHash, PasswordVerifier,
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
 };
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
 use crate::utils::error::{AppError, AppResult};
 use base64::{engine::general_purpose, Engine as _};
-
 // Constants for encryption
 const NONCE_LENGTH: usize = 12;
 
@@ -23,32 +22,26 @@ pub fn generate_dek() -> [u8; 32] {
 }
 
 /// Generate a salt for key derivation
-pub fn generate_salt() -> String {
-    let salt = SaltString::generate(&mut OsRng);
-    salt.to_string()
+fn generate_salt() -> SaltString {
+    SaltString::generate(&mut OsRng)
 }
 
 /// Hash the master password using Argon2
-pub fn hash_master_password(password: &str, salt: &str) -> AppResult<String> {
-    let salt_string = SaltString::from_b64(salt).map_err(|e| AppError::Crypto(e.to_string()))?;
-    let argon2_instance = Argon2::default();
+pub fn hash_master_password(password: &str) -> AppResult<String> {
+    let salt_string = generate_salt();
 
-    let mut password_hash = [0u8; 32];
-    argon2_instance
-        .hash_password_into(
-            password.as_bytes(),
-            salt_string.to_string().as_bytes(),
-            &mut password_hash,
-        )
-        .map_err(|e| AppError::Crypto(e.to_string()))?;
+    let hashed_password = Argon2::default()
+        .hash_password(password.as_bytes(), &salt_string)
+        .map_err(|e| AppError::Crypto(e.to_string()))?
+        .to_string();
 
-    Ok(general_purpose::STANDARD.encode(password_hash))
+    Ok(hashed_password)
 }
 
 /// Verify the master password against its hash
 pub fn verify_master_password(password: &str, password_hash: &str) -> AppResult<bool> {
-    let parsed_hash =
-        PasswordHash::new(password_hash).map_err(|e| AppError::Crypto(e.to_string()))?;
+    let parsed_hash = PasswordHash::new(&password_hash)
+        .map_err(|e| AppError::Crypto(format!("Invalid password hash: {}", e.to_string())))?;
 
     let argon2_instance = Argon2::default();
     let result = argon2_instance
@@ -59,14 +52,10 @@ pub fn verify_master_password(password: &str, password_hash: &str) -> AppResult<
 }
 
 /// Derive a key encryption key (KEK) from the master password
-pub fn derive_kek(master_password: &str, salt: &str) -> AppResult<Key<Aes256Gcm>> {
-    let mut hasher = Sha256::new();
-    hasher.update(master_password.as_bytes());
-    hasher.update(salt.as_bytes());
+pub fn derive_kek(master_password: &str) -> AppResult<Key<Aes256Gcm>> {
+    let result = Sha256::digest(master_password.as_bytes());
 
-    let result = hasher.finalize();
     let key = Key::<Aes256Gcm>::from_slice(&result).to_owned();
-
     Ok(key)
 }
 
@@ -158,9 +147,8 @@ pub fn generate_recovery_key() -> String {
 
 /// Hash a recovery code
 pub fn hash_recovery_code(code: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(code.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let hash = Sha256::digest(code.as_bytes());
+    format!("{:x}", hash)
 }
 
 /// Generate a secure token for sessions
@@ -173,6 +161,6 @@ pub fn generate_session_token() -> String {
 }
 
 /// format multiple recovery codes
-pub fn generate_recovery_codes(count: usize) -> Vec<String> {
+pub fn generate_recovery_keys(count: usize) -> Vec<String> {
     (0..count).map(|_| generate_recovery_key()).collect()
 }

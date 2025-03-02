@@ -1,23 +1,38 @@
 use super::user::Model;
+use async_graphql::{InputObject, SimpleObject};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use validator::Validate;
 
-// DTOs for API communication
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, InputObject, Validate)]
 pub struct UserSignupRequest {
+    #[validate(email(message = "Invalid email"))]
     pub email: String,
-    pub username: String,
+    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
     pub master_password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, SimpleObject)]
+pub struct UserSignupResponse {
+    pub id: Uuid,
+    pub recovery_keys: Vec<String>,
+}
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize, InputObject, Validate)]
 pub struct UserLoginRequest {
+    #[validate(email(message = "Invalid email"))]
     pub email: String,
+    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
     pub master_password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, SimpleObject)]
+pub struct UserLoginResponse {
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, SimpleObject)]
 pub struct UserResponse {
     pub id: Uuid,
     pub email: String,

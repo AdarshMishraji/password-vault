@@ -7,7 +7,13 @@ resolver = "2"
 
 [workspace.dependencies]
 axum = "0.8"
-async-graphql = "7.0"
+async-graphql = { version = "7.0", features = [
+    "chrono",
+    "decimal",
+    "log",
+    "tracing",
+    "uuid",
+] }
 async-graphql-axum = "7.0"
 
 tokio = { version = "1.43", features = ["full"] }

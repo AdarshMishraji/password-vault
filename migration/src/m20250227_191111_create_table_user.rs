@@ -6,9 +6,7 @@ pub enum User {
     Id,
     Email,
     MasterPasswordHash,
-    MasterPasswordSalt,
     EncryptedDEK,
-    Salt,
     CreatedAt,
     UpdatedAt,
 }
@@ -27,14 +25,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(User::Id).uuid().primary_key())
                     .col(ColumnDef::new(User::Email).string().unique_key().not_null())
                     .col(ColumnDef::new(User::MasterPasswordHash).string().not_null())
-                    .col(ColumnDef::new(User::MasterPasswordSalt).string().not_null())
                     .col(
                         ColumnDef::new(User::EncryptedDEK)
                             .string()
                             .unique_key()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(User::Salt).string().unique_key().not_null())
                     .col(
                         ColumnDef::new(User::CreatedAt)
                             .timestamp_with_time_zone()
