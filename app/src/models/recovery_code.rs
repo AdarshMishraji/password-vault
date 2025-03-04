@@ -12,7 +12,10 @@ pub struct Model {
     pub code_hash: String,
     pub encrypted_dek: String,
     pub used: bool,
+
+    #[sea_orm(created_at)]
     pub created_at: DateTime<Utc>,
+    #[sea_orm(updated_at)]
     pub updated_at: DateTime<Utc>,
 }
 

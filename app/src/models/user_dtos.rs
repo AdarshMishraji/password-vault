@@ -25,17 +25,12 @@ pub struct UserLoginRequest {
     pub master_password: String,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, SimpleObject)]
-pub struct UserLoginResponse {
-    pub message: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RecoveryKeysResponse {
     pub recovery_keys: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRedisSession {
     pub id: Uuid,
     pub email: String,

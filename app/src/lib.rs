@@ -1,10 +1,12 @@
 mod configs;
 mod constants;
 mod dtos;
+mod middlewares;
 mod models;
 mod routes;
 mod services;
 mod utils;
+mod validators;
 
 use std::{sync::Arc, time::Duration};
 

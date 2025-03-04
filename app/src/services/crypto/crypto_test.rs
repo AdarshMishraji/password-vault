@@ -1,9 +1,6 @@
 #[cfg(test)]
 mod test {
-    use serde_json::{json, Value};
-
     use crate::{
-        models::password,
         services::crypto::*,
         utils::error::{AppError, AppResult},
     };

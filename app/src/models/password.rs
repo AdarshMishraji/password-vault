@@ -18,7 +18,12 @@ pub struct Model {
     #[sea_orm(nullable)]
     pub email: Option<String>,
     pub encrypted_password: String,
+    #[sea_orm(nullable)]
+    pub is_deleted: bool,
+
+    #[sea_orm(created_at)]
     pub created_at: DateTime<Utc>,
+    #[sea_orm(updated_at)]
     pub updated_at: DateTime<Utc>,
 }
 

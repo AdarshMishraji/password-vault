@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use async_graphql::Context;
+use axum::http::header;
 use chrono::{Duration, Utc};
-use r2d2_redis::{r2d2::Pool, redis::Commands, RedisConnectionManager};
+use r2d2_redis::{RedisConnectionManager, r2d2::Pool, redis::Commands};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set, TransactionError,
     TransactionTrait,
@@ -12,13 +13,14 @@ use uuid::Uuid;
 
 use crate::{
     configs::env::Env,
-    dtos::app_state::AppState,
+    dtos::{
+        app_state::AppState,
+        graphql_context::GraphQLContext,
+        response::{GraphqlGenericResponse, GraphqlResponse},
+    },
     models::{
         recovery_code, user,
-        user_dtos::{
-            UserLoginRequest, UserLoginResponse, UserRedisSession, UserSignupRequest,
-            UserSignupResponse,
-        },
+        user_dtos::{UserLoginRequest, UserRedisSession, UserSignupRequest, UserSignupResponse},
     },
     services::crypto::{
         decrypt_dek, derive_kek, encrypt_dek, generate_dek, generate_recovery_keys,
@@ -83,7 +85,7 @@ fn generate_and_save_session(
         .unwrap();
 
     ctx.insert_http_header(
-        "Set-Cookie",
+        header::SET_COOKIE,
         format!(
             "session_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Expires={}",
             session_token,
@@ -97,7 +99,7 @@ fn generate_and_save_session(
 pub async fn signup(
     ctx: &Context<'_>,
     request: UserSignupRequest,
-) -> AppResult<UserSignupResponse> {
+) -> AppResult<GraphqlResponse<UserSignupResponse>> {
     let app_state = ctx
         .data::<Arc<AppState>>()
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
@@ -164,13 +166,20 @@ pub async fn signup(
         ctx,
     )?;
 
-    return Ok(UserSignupResponse {
-        id: user_id,
-        recovery_keys,
+    return Ok(GraphqlResponse::<UserSignupResponse> {
+        success: true,
+        message: "Signup Successful".to_string(),
+        data: UserSignupResponse {
+            recovery_keys,
+            id: user_id,
+        },
     });
 }
 
-pub async fn login(ctx: &Context<'_>, request: UserLoginRequest) -> AppResult<UserLoginResponse> {
+pub async fn login(
+    ctx: &Context<'_>,
+    request: UserLoginRequest,
+) -> AppResult<GraphqlGenericResponse> {
     let app_state = ctx
         .data::<Arc<AppState>>()
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
@@ -216,7 +225,45 @@ pub async fn login(ctx: &Context<'_>, request: UserLoginRequest) -> AppResult<Us
         ctx,
     )?;
 
-    return Ok(UserLoginResponse {
+    return Ok(GraphqlGenericResponse {
+        success: true,
         message: "Login Successful".to_string(),
     });
+}
+
+pub async fn logout(ctx: &Context<'_>, _: &UserRedisSession) -> AppResult<GraphqlGenericResponse> {
+    let app_state = ctx
+        .data::<Arc<AppState>>()
+        .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
+
+    let mut redis_connection = app_state
+        .redis_pool_manager
+        .get()
+        .map_err(|_| AppError::Internal("Failed to get redis connection from pool".to_string()))?;
+
+    let gql_ctx = ctx
+        .data::<Arc<GraphQLContext>>()
+        .map_err(|_| AppError::Internal("GraphQL Context is not passed".to_string()))?;
+
+    let session_token = gql_ctx
+        .session_token
+        .as_ref()
+        .ok_or(AppError::Authorization(
+            "Session token is missing".to_string(),
+        ))?;
+
+    redis_connection
+        .del::<String, ()>(session_token.to_string())
+        .map_err(|_| AppError::Authorization("Session token is invalid or expired".to_string()))?;
+
+    ctx.insert_http_header(
+        header::SET_COOKIE,
+        "session_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            .to_string(),
+    );
+
+    Ok(GraphqlGenericResponse {
+        success: true,
+        message: "Logout Successful".to_string(),
+    })
 }
