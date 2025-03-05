@@ -209,8 +209,8 @@ pub async fn get_passwords(
     let user_id = user_redis_session.id;
 
     let page = request.page;
-    let next_page_token = request.next_page_token;
     const PAGE_SIZE: u64 = 10;
+    let next_page_token = request.next_page_token;
 
     let dek_u8_32: [u8; 32] = user_redis_session
         .dek

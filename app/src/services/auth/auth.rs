@@ -21,12 +21,13 @@ use crate::{
     },
     models::{
         recovery_code, user,
-        user_dtos::{UserLoginRequest, UserRedisSession, UserSignupRequest, UserSignupResponse},
+        user_dtos::{
+            ChangeMasterPasswordRequest, CheckRecoveryCodeValidityRequest, RecoveryAccountRequest,
+            RecoveryKeyResponse, UserLoginRequest, UserRedisSession, UserSignupRequest,
+            UserSignupResponse,
+        },
     },
-    services::crypto::{
-        decrypt_dek, derive_kek, encrypt_dek, generate_dek, generate_recovery_keys,
-        generate_session_token, hash_master_password, hash_recovery_code, verify_master_password,
-    },
+    services::crypto::{self, decrypt_dek},
     utils::error::{AppError, AppResult},
 };
 
@@ -35,16 +36,16 @@ fn generate_recovery_keys_for_dek(
     user_id: &Uuid,
     env_variables: &Arc<Env>,
 ) -> AppResult<(Vec<recovery_code::ActiveModel>, Vec<String>)> {
-    let recovery_keys = generate_recovery_keys(env_variables.recovery_keys_count);
+    let recovery_keys = crypto::generate_recovery_keys(env_variables.recovery_keys_count);
 
     let mut recovery_code_entities: Vec<recovery_code::ActiveModel> = vec![];
 
     for recovery_code in recovery_keys.iter() {
-        let hash = hash_recovery_code(&recovery_code);
+        let hash = crypto::hash_recovery_code(&recovery_code);
 
-        let recovery_kek = derive_kek(&recovery_code)?;
+        let recovery_kek = crypto::derive_kek(&recovery_code)?;
 
-        let encrypted_encrypted_dek = encrypt_dek(dek, &recovery_kek).unwrap();
+        let encrypted_encrypted_dek = crypto::encrypt_dek(dek, &recovery_kek).unwrap();
 
         let recovery_code_entity = recovery_code::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -66,7 +67,7 @@ fn generate_and_save_session(
     env_variables: Arc<Env>,
     ctx: &Context<'_>,
 ) -> AppResult<()> {
-    let session_token = generate_session_token();
+    let session_token = crypto::generate_session_token();
     let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes);
 
     let user_redis_session_str =
@@ -122,13 +123,13 @@ pub async fn signup(
         return Err(AppError::Conflict("User Already Exists".to_string()));
     }
 
-    let kek = derive_kek(&master_password)?;
-    let dek = generate_dek();
+    let kek = crypto::derive_kek(&master_password)?;
+    let dek = crypto::generate_dek();
 
-    let encrypted_dek = encrypt_dek(&dek, &kek)?;
+    let encrypted_dek = crypto::encrypt_dek(&dek, &kek)?;
 
     let user_id = Uuid::new_v4();
-    let master_password_hash = hash_master_password(&master_password)?;
+    let master_password_hash = crypto::hash_master_password(&master_password)?;
 
     let user_entity = user::ActiveModel {
         id: Set(user_id),
@@ -195,25 +196,20 @@ pub async fn login(
         .filter(user::Column::Email.eq(&email))
         .one(db_connection.as_ref())
         .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-    if user.is_none() {
-        return Err(AppError::NotFound("User Not Found".to_string()));
-    }
-
-    let user = user.unwrap();
+        .map_err(|e| AppError::Database(e.to_string()))?
+        .ok_or(AppError::NotFound("User Not Found".to_string()))?;
 
     let user_master_password_hash = user.master_password_hash;
     let request_master_password = request.master_password;
 
-    if !verify_master_password(&request_master_password, &user_master_password_hash)? {
+    if !crypto::verify_master_password(&request_master_password, &user_master_password_hash)? {
         return Err(AppError::Authorization(
             "Invalid Master Password".to_string(),
         ));
     }
 
-    let kek = derive_kek(&request_master_password)?;
-    let dek = decrypt_dek(&user.encrypted_dek, &kek)?;
+    let kek = crypto::derive_kek(&request_master_password)?;
+    let dek = crypto::decrypt_dek(&user.encrypted_dek, &kek)?;
 
     generate_and_save_session(
         UserRedisSession {
@@ -266,5 +262,206 @@ pub async fn logout(ctx: &Context<'_>, _: &UserRedisSession) -> AppResult<Graphq
     Ok(GraphqlGenericResponse {
         success: true,
         message: "Logout Successful".to_string(),
+    })
+}
+
+pub async fn check_recovery_code_validity(
+    ctx: &Context<'_>,
+    user_redis_session: &UserRedisSession,
+    request: CheckRecoveryCodeValidityRequest,
+) -> AppResult<GraphqlGenericResponse> {
+    let app_state = ctx
+        .data::<Arc<AppState>>()
+        .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
+
+    let db_connection = &app_state.database_connection;
+
+    let user_id = user_redis_session.id;
+
+    let recovery_code = request.recovery_code;
+
+    let recovery_code_hash = crypto::hash_recovery_code(&recovery_code);
+
+    let recovery_code_entity = recovery_code::Entity::find()
+        .filter(recovery_code::Column::CodeHash.eq(recovery_code_hash))
+        .filter(recovery_code::Column::UserId.eq(user_id))
+        .one(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
+        .ok_or(AppError::NotFound("Recovery Code Not Found".to_string()))?;
+
+    if recovery_code_entity.used {
+        return Err(AppError::Conflict("Recovery Code Already Used".to_string()));
+    }
+
+    Ok(GraphqlGenericResponse {
+        success: true,
+        message: "Recovery Code is Valid".to_string(),
+    })
+}
+
+pub async fn generate_recovery_keys(
+    ctx: &Context<'_>,
+    user_redis_session: &UserRedisSession,
+) -> AppResult<GraphqlResponse<RecoveryKeyResponse>> {
+    let app_state = ctx
+        .data::<Arc<AppState>>()
+        .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
+
+    let db_connection = &app_state.database_connection;
+
+    let user_id = user_redis_session.id;
+    let dek_u8_32: [u8; 32] = user_redis_session
+        .dek
+        .clone()
+        .try_into()
+        .map_err(|_| AppError::Crypto("Unable to convert DEK to [u8; 32]".to_string()))?;
+
+    let recovery_code_entities = recovery_code::Entity::find()
+        .filter(recovery_code::Column::UserId.eq(user_id))
+        .filter(recovery_code::Column::Used.eq(false))
+        .all(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    if recovery_code_entities.len() != 0 {
+        return Err(AppError::Conflict(
+            "Recovery Keys Already Generated".to_string(),
+        ));
+    }
+
+    let (recovery_code_entities, recovery_keys) =
+        generate_recovery_keys_for_dek(&dek_u8_32, &user_id, &app_state.env_variables)?;
+
+    recovery_code::Entity::insert_many(recovery_code_entities)
+        .exec(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    Ok(GraphqlResponse::<RecoveryKeyResponse> {
+        success: true,
+        message: "Recovery Keys Generated".to_string(),
+        data: RecoveryKeyResponse { recovery_keys },
+    })
+}
+
+pub async fn recover_account(
+    ctx: &Context<'_>,
+    request: RecoveryAccountRequest,
+) -> AppResult<GraphqlGenericResponse> {
+    let app_state = ctx
+        .data::<Arc<AppState>>()
+        .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
+
+    let db_connection = &app_state.database_connection;
+
+    let email = request.email;
+
+    let user = user::Entity::find()
+        .filter(user::Column::Email.eq(&email))
+        .one(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
+        .ok_or(AppError::NotFound("User Not Found".to_string()))?;
+
+    let recovery_code = request.recovery_code;
+    let recovery_code_hash = crypto::hash_recovery_code(&recovery_code);
+
+    let recovery_code_entity = recovery_code::Entity::find()
+        .filter(recovery_code::Column::CodeHash.eq(recovery_code_hash))
+        .filter(recovery_code::Column::UserId.eq(user.id))
+        .one(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
+        .ok_or(AppError::NotFound("Recovery Code Not Found".to_string()))?;
+
+    if recovery_code_entity.used {
+        return Err(AppError::Conflict("Recovery Code Already Used".to_string()));
+    }
+
+    let new_master_password = request.new_master_password;
+    let new_kek = crypto::derive_kek(&new_master_password)?;
+    let new_master_password_hash = crypto::hash_master_password(&new_master_password)?;
+
+    let recovery_kek = crypto::derive_kek(&recovery_code)?;
+    let dek = decrypt_dek(&recovery_code_entity.encrypted_dek, &recovery_kek)?;
+
+    let encrypted_dek = crypto::encrypt_dek(&dek, &new_kek)?;
+
+    let mut user_model: user::ActiveModel = user.into();
+    user_model.master_password_hash = Set(new_master_password_hash);
+    user_model.encrypted_dek = Set(encrypted_dek);
+    user_model.updated_at = Set(Utc::now());
+
+    let mut recovery_code_entity: recovery_code::ActiveModel = recovery_code_entity.into();
+    recovery_code_entity.used = Set(true);
+    recovery_code_entity.updated_at = Set(Utc::now());
+
+    db_connection
+        .transaction(move |txn| {
+            Box::pin(async move {
+                user_model.update(txn).await?;
+                recovery_code_entity.update(txn).await?;
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|e: TransactionError<DbErr>| AppError::Database(e.to_string()))?;
+
+    Ok(GraphqlGenericResponse {
+        success: true,
+        message: "Account Recovered Successfully".to_string(),
+    })
+}
+
+pub async fn change_master_password(
+    ctx: &Context<'_>,
+    user_redis_session: &UserRedisSession,
+    request: ChangeMasterPasswordRequest,
+) -> AppResult<GraphqlGenericResponse> {
+    let app_state = ctx
+        .data::<Arc<AppState>>()
+        .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
+
+    let db_connection = &app_state.database_connection;
+
+    let user_id = user_redis_session.id;
+
+    let old_master_password = request.old_master_password;
+    let old_master_password_hash = crypto::hash_master_password(&old_master_password)?;
+
+    let user = user::Entity::find()
+        .filter(user::Column::Id.eq(user_id))
+        .filter(user::Column::MasterPasswordHash.eq(old_master_password_hash))
+        .one(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
+        .ok_or(AppError::Authorization(
+            "Invalid Master Password".to_string(),
+        ))?;
+
+    let encrypted_dek = &user.encrypted_dek;
+    let new_master_password = request.new_master_password;
+    let new_master_password_hash = crypto::hash_master_password(&new_master_password)?;
+
+    let old_kek = crypto::derive_kek(&old_master_password)?;
+    let new_kek = crypto::derive_kek(&new_master_password)?;
+
+    let dek = crypto::decrypt_dek(encrypted_dek, &old_kek)?;
+    let encrypted_dek = crypto::encrypt_dek(&dek, &new_kek)?;
+
+    let mut user_model: user::ActiveModel = user.into();
+    user_model.master_password_hash = Set(new_master_password_hash);
+    user_model.encrypted_dek = Set(encrypted_dek);
+    user_model.updated_at = Set(Utc::now());
+
+    user_model
+        .update(db_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    Ok(GraphqlGenericResponse {
+        success: true,
+        message: "Master Password Changed Successfully".to_string(),
     })
 }

@@ -1,3 +1,3 @@
 pub mod auth;
-pub mod crypto;
+mod crypto;
 pub mod password;

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{
     password_dtos::{PasswordResponse, PasswordsPageResponse},
-    user_dtos::UserSignupResponse,
+    user_dtos::{RecoveryKeyResponse, UserSignupResponse},
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, SimpleObject)]
@@ -22,6 +22,10 @@ pub struct GraphqlGenericResponse {
     params(PasswordsPageResponse)
 ))]
 #[graphql(concrete(name = "GraphqlResponse_PasswordResponse", params(PasswordResponse)))]
+#[graphql(concrete(
+    name = "GraphqlResponse_RecoveryKeyResponse",
+    params(RecoveryKeyResponse)
+))]
 pub struct GraphqlResponse<T>
 where
     T: Send + Sync + OutputType,
