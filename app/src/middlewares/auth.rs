@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
-use async_graphql::Context;
-use r2d2_redis::redis::Commands;
-
 use crate::{
     dtos::{app_state::AppState, graphql_context::GraphQLContext},
     models::user_dtos::UserRedisSession,
     utils::error::{AppError, AppResult},
 };
+use async_graphql::Context;
+use redis::Commands;
 
-pub async fn session_auth_middleware(ctx: &Context<'_>) -> AppResult<UserRedisSession> {
+pub fn session_auth_middleware(ctx: &Context<'_>) -> AppResult<UserRedisSession> {
     let app_state = ctx
         .data::<Arc<AppState>>()
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
@@ -49,7 +48,7 @@ pub async fn session_auth_middleware(ctx: &Context<'_>) -> AppResult<UserRedisSe
     Ok(user_redis_session)
 }
 
-pub async fn increment_session_expire(ctx: &Context<'_>) -> AppResult<()> {
+pub fn increment_session_expire(ctx: &Context<'_>) -> AppResult<()> {
     let app_state = ctx
         .data::<Arc<AppState>>()
         .map_err(|_| AppError::Internal("App State is not passed".to_string()))?;
@@ -75,7 +74,7 @@ pub async fn increment_session_expire(ctx: &Context<'_>) -> AppResult<()> {
     redis_connection
         .expire::<String, usize>(
             session_token.to_string(),
-            env_variables.session_expire_minutes as usize * 60,
+            env_variables.session_expire_minutes * 60,
         )
         .map_err(|_| AppError::Internal("Failed to increment session expire".to_string()))?;
 

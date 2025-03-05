@@ -7,7 +7,7 @@ pub struct Env {
     pub database_url: String,
     pub redis_url: String,
     pub recovery_keys_count: i32,
-    pub session_expire_minutes: i32,
+    pub session_expire_minutes: i64,
 }
 
 pub fn new() -> Arc<Env> {
@@ -24,7 +24,7 @@ pub fn new() -> Arc<Env> {
 
     let session_expire_minutes = std::env::var("SESSION_EXPIRE_MINUTES")
         .expect("SESSION_EXPIRE_MINUTES is not set")
-        .parse::<i32>()
+        .parse::<i64>()
         .expect("SESSION_EXPIRE_MINUTES is not a number");
 
     Arc::new(Env {

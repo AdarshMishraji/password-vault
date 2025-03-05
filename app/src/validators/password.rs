@@ -43,6 +43,12 @@ pub fn validate_get_passwords_request<'v_a>(
         return Err(ValidationError::new("Page must be greater than 0"));
     }
 
+    if get_passwords_request.page == 1 && get_passwords_request.next_page_token.is_some() {
+        return Err(ValidationError::new(
+            "Next page token is not required for page 1",
+        ));
+    }
+
     if get_passwords_request.page > 1 && get_passwords_request.next_page_token.is_none() {
         return Err(ValidationError::new(
             "Next page token is required for page greater than 1",

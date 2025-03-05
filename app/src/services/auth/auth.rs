@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_graphql::Context;
 use axum::http::header;
 use chrono::{Duration, Utc};
-use r2d2_redis::{RedisConnectionManager, r2d2::Pool, redis::Commands};
+use r2d2::Pool;
+use redis::{Client, Commands};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set, TransactionError,
     TransactionTrait,
@@ -61,12 +62,12 @@ fn generate_recovery_keys_for_dek(
 
 fn generate_and_save_session(
     user_redis_session: UserRedisSession,
-    redis_pool_manager: &Arc<Pool<RedisConnectionManager>>,
+    redis_pool_manager: &Arc<Pool<Client>>,
     env_variables: Arc<Env>,
     ctx: &Context<'_>,
 ) -> AppResult<()> {
     let session_token = generate_session_token();
-    let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes as i64);
+    let expires_at = Utc::now() + Duration::minutes(env_variables.session_expire_minutes);
 
     let user_redis_session_str =
         to_string(&user_redis_session).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -79,7 +80,7 @@ fn generate_and_save_session(
         .set_ex::<String, String, ()>(
             session_token.to_string(),
             user_redis_session_str,
-            (env_variables.session_expire_minutes.clone() as usize) * 60,
+            (env_variables.session_expire_minutes as u64) * 60,
         )
         .map_err(|e| AppError::Database(e.to_string()))
         .unwrap();

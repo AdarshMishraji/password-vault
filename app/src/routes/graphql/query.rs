@@ -24,7 +24,7 @@ impl Query {
         ctx: &Context<'_>,
         request: GetPasswordsRequest,
     ) -> AppResult<GraphqlResponse<PasswordsPageResponse>> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         request
             .validate()
@@ -32,7 +32,7 @@ impl Query {
 
         let response = get_passwords(ctx, &user_redis_session, request).await;
 
-        increment_session_expire(ctx).await?;
+        increment_session_expire(ctx)?;
 
         response
     }
@@ -42,7 +42,7 @@ impl Query {
         ctx: &Context<'_>,
         request: GetPasswordRequest,
     ) -> AppResult<GraphqlResponse<PasswordResponse>> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         request
             .validate()
@@ -50,7 +50,7 @@ impl Query {
 
         let response = get_password(ctx, &user_redis_session, request).await;
 
-        increment_session_expire(ctx).await?;
+        increment_session_expire(ctx)?;
 
         response
     }

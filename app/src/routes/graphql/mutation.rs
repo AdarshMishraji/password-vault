@@ -45,7 +45,7 @@ impl Mutation {
     }
 
     async fn logout(&self, ctx: &Context<'_>) -> AppResult<GraphqlGenericResponse> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         logout(ctx, &user_redis_session).await
     }
@@ -57,7 +57,7 @@ impl Mutation {
         ctx: &Context<'_>,
         request: AddPasswordRequest,
     ) -> AppResult<GraphqlGenericResponse> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         request
             .validate()
@@ -65,7 +65,7 @@ impl Mutation {
 
         let response = add_password(ctx, &user_redis_session, request).await;
 
-        increment_session_expire(ctx).await?;
+        increment_session_expire(ctx)?;
 
         response
     }
@@ -75,7 +75,7 @@ impl Mutation {
         ctx: &Context<'_>,
         request: UpdatePasswordRequest,
     ) -> AppResult<GraphqlGenericResponse> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         request
             .validate()
@@ -83,7 +83,7 @@ impl Mutation {
 
         let response = update_password(ctx, &user_redis_session, request).await;
 
-        increment_session_expire(ctx).await?;
+        increment_session_expire(ctx)?;
 
         response
     }
@@ -93,11 +93,11 @@ impl Mutation {
         ctx: &Context<'_>,
         request: DeletePasswordRequest,
     ) -> AppResult<GraphqlGenericResponse> {
-        let user_redis_session = session_auth_middleware(ctx).await?;
+        let user_redis_session = session_auth_middleware(ctx)?;
 
         let response = delete_password(ctx, &user_redis_session, request).await;
 
-        increment_session_expire(ctx).await?;
+        increment_session_expire(ctx)?;
 
         response
     }
