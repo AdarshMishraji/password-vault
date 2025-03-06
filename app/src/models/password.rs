@@ -14,9 +14,9 @@ pub struct Model {
     #[sea_orm(nullable)]
     pub app_name: Option<String>,
     #[sea_orm(nullable)]
-    pub username: Option<String>,
+    pub encrypted_username: Option<String>,
     #[sea_orm(nullable)]
-    pub email: Option<String>,
+    pub encrypted_email: Option<String>,
     pub encrypted_password: String,
     #[sea_orm(nullable)]
     pub is_deleted: bool,

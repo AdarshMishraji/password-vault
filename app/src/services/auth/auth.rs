@@ -27,7 +27,7 @@ use crate::{
             UserSignupResponse,
         },
     },
-    services::crypto::{self, decrypt_dek},
+    services::crypto::{self, decrypt_dek, verify_master_password},
     utils::error::{AppError, AppResult},
 };
 
@@ -428,17 +428,21 @@ pub async fn change_master_password(
     let user_id = user_redis_session.id;
 
     let old_master_password = request.old_master_password;
-    let old_master_password_hash = crypto::hash_master_password(&old_master_password)?;
 
     let user = user::Entity::find()
         .filter(user::Column::Id.eq(user_id))
-        .filter(user::Column::MasterPasswordHash.eq(old_master_password_hash))
         .one(db_connection.as_ref())
         .await
         .map_err(|e| AppError::Database(e.to_string()))?
         .ok_or(AppError::Authorization(
             "Invalid Master Password".to_string(),
         ))?;
+
+    if !verify_master_password(&old_master_password, &user.master_password_hash)? {
+        return Err(AppError::Authorization(
+            "Invalid Master Password".to_string(),
+        ));
+    }
 
     let encrypted_dek = &user.encrypted_dek;
     let new_master_password = request.new_master_password;

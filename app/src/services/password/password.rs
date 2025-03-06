@@ -34,6 +34,29 @@ pub async fn add_password(
 
     let database_connection = &app_state.database_connection;
     let user_id = user_redis_session.id;
+
+    let mut existing_password_query =
+        password::Entity::find().filter(password::Column::UserId.eq(user_id));
+
+    if let Some(website_url) = &request.website_url {
+        existing_password_query =
+            existing_password_query.filter(password::Column::WebsiteUrl.eq(website_url));
+    } else if let Some(app_name) = &request.app_name {
+        existing_password_query =
+            existing_password_query.filter(password::Column::AppName.eq(app_name));
+    }
+
+    let existing_password = existing_password_query
+        .one(database_connection.as_ref())
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to find password: {}", e.to_string())))?;
+
+    if let Some(_) = existing_password {
+        return Err(AppError::Conflict(
+            "Password already exists for this website/app".to_string(),
+        ));
+    }
+
     let dek = user_redis_session.dek.clone();
 
     let dek_u8_32: [u8; 32] = dek
@@ -41,13 +64,22 @@ pub async fn add_password(
         .map_err(|_| AppError::Crypto("Unable to convert DEK to [u8; 32]".to_string()))?;
 
     let encrypted_password = encrypt_password(&request.password, &dek_u8_32)?;
+    let encrypted_email = request
+        .email
+        .as_ref()
+        .map(|e| encrypt_password(e, &dek_u8_32).unwrap());
+
+    let encrypted_username = request
+        .username
+        .as_ref()
+        .map(|u| encrypt_password(u, &dek_u8_32).unwrap());
 
     password::ActiveModel {
         id: Set(uuid::Uuid::new_v4()),
         website_url: Set(request.website_url),
         app_name: Set(request.app_name),
-        email: Set(request.email),
-        username: Set(request.username),
+        encrypted_email: Set(encrypted_email),
+        encrypted_username: Set(encrypted_username),
         encrypted_password: Set(encrypted_password),
         user_id: Set(user_id),
         ..Default::default()
@@ -90,6 +122,12 @@ pub async fn get_password(
 
     let encrypted_password = password_entry.encrypted_password;
     let password = decrypt_password(&encrypted_password, &dek_u8_32)?;
+    let email = password_entry
+        .encrypted_email
+        .map(|e| decrypt_password(&e, &dek_u8_32).unwrap());
+    let username = password_entry
+        .encrypted_username
+        .map(|u| decrypt_password(&u, &dek_u8_32).unwrap());
 
     Ok(GraphqlResponse::<PasswordResponse> {
         success: true,
@@ -98,8 +136,8 @@ pub async fn get_password(
             id: password_entry.id,
             website_url: password_entry.website_url.clone(),
             app_name: password_entry.app_name.clone(),
-            email: password_entry.email.clone(),
-            username: password_entry.username.clone(),
+            email,
+            username,
             password,
             created_at: password_entry.created_at,
             updated_at: password_entry.updated_at,
@@ -152,11 +190,13 @@ pub async fn update_password(
     }
 
     if let Some(username) = &username {
-        updated_password.username = Set(Some(username.to_string()));
+        let encrypted_username = encrypt_password(username, &dek_u8_32)?;
+        updated_password.encrypted_username = Set(Some(encrypted_username));
     }
 
     if let Some(email) = &email {
-        updated_password.email = Set(Some(email.to_string()));
+        let encrypted_email = encrypt_password(email, &dek_u8_32)?;
+        updated_password.encrypted_email = Set(Some(encrypted_email));
     }
     updated_password.updated_at = Set(Utc::now());
 
@@ -253,13 +293,21 @@ pub async fn get_passwords(
     for password_entry in &passwords {
         let encrypted_password = &password_entry.encrypted_password;
         let password = decrypt_password(&encrypted_password, &dek_u8_32)?;
+        let email = password_entry
+            .encrypted_email
+            .as_ref()
+            .map(|e| decrypt_password(&e, &dek_u8_32).unwrap());
+        let username = password_entry
+            .encrypted_username
+            .as_ref()
+            .map(|u| decrypt_password(&u, &dek_u8_32).unwrap());
 
         passwords_response.push(PasswordResponse {
             id: password_entry.id,
             website_url: password_entry.website_url.clone(),
             app_name: password_entry.app_name.clone(),
-            email: password_entry.email.clone(),
-            username: password_entry.username.clone(),
+            email,
+            username,
             password,
             created_at: password_entry.created_at,
             updated_at: password_entry.updated_at,
