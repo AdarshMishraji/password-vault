@@ -1,6 +1,6 @@
 run-app:
 	@echo "Running app"
-	cargo run --bin=app
+	RUST_LOG=tower_http=trace cargo run --bin=app
 
 run-migration:
 	@echo "Running migration"
